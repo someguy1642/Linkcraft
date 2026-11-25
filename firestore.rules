@@ -1,0 +1,203 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Pillar 3: Reusable hardened primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidHttpUrl(url, maxLen) {
+      return url is string && url.size() >= 8 && url.size() <= maxLen && url.matches('^https?://.*');
+    }
+
+    // Entity validation helpers (Pillar 2: Anti-Update-Gap)
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'plan', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'photoURL', 'plan', 'createdAt', 'updatedAt'])
+        && data.uid is string
+        && isValidId(data.uid)
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 100
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && data.plan is string
+        && (data.plan == 'free' || data.plan == 'pro')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPrivateAccount(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'updatedAt'])
+        && data.uid is string
+        && isValidId(data.uid)
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 254
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSponsor(data, sponsorId) {
+      return data.keys().hasAll(['id', 'ownerId', 'title', 'ctaLabel', 'ctaUrl', 'active', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'title', 'description', 'ctaLabel', 'ctaUrl', 'badgeText', 'active', 'createdAt', 'updatedAt'])
+        && data.id is string
+        && isValidId(data.id)
+        && data.id == sponsorId
+        && data.ownerId is string
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.title is string
+        && data.title.size() >= 3
+        && data.title.size() <= 80
+        && (!('description' in data) || (data.description is string && data.description.size() <= 200))
+        && data.ctaLabel is string
+        && data.ctaLabel.size() >= 2
+        && data.ctaLabel.size() <= 30
+        && isValidHttpUrl(data.ctaUrl, 500)
+        && (!('badgeText' in data) || (data.badgeText is string && data.badgeText.size() <= 24))
+        && data.active is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserLink(data, linkId) {
+      return data.keys().hasAll(['id', 'ownerId', 'code', 'targetUrl', 'interstitialEnabled', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'code', 'targetUrl', 'interstitialEnabled', 'sponsorId', 'createdAt', 'updatedAt'])
+        && data.id is string
+        && isValidId(data.id)
+        && data.id == linkId
+        && data.ownerId is string
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.code is string
+        && data.code.size() >= 3
+        && data.code.size() <= 30
+        && data.code.matches('^[a-zA-Z0-9_\\-]+$')
+        && isValidHttpUrl(data.targetUrl, 2048)
+        && data.interstitialEnabled is bool
+        && (!('sponsorId' in data) || (data.sponsorId is string && data.sponsorId.size() <= 128))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Connection check document (read-only ping)
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Public-safe user profiles (plan is locked to 'free' on create and immutable by client on update)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().plan == 'free'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().plan == existing().plan
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
+      allow delete: if false;
+
+      // PII-isolated private user subcollection
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && isOwner(userId);
+        allow list: if false;
+        allow create: if isValidId(userId)
+          && isValidId(docId)
+          && docId == 'account'
+          && isOwner(userId)
+          && isValidPrivateAccount(incoming(), userId)
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId)
+          && isValidId(docId)
+          && docId == 'account'
+          && isOwner(userId)
+          && isValidPrivateAccount(incoming(), userId)
+          && incoming().uid == existing().uid
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
+        allow delete: if false;
+      }
+    }
+
+    // Owner-scoped sponsor campaigns
+    match /sponsors/{sponsorId} {
+      allow get: if isValidId(sponsorId) && isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow list: if isVerifiedUser() && resource.data.ownerId == request.auth.uid;
+      allow create: if isValidId(sponsorId)
+        && isVerifiedUser()
+        && isValidSponsor(incoming(), sponsorId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(sponsorId)
+        && isVerifiedUser()
+        && existing().ownerId == request.auth.uid
+        && isValidSponsor(incoming(), sponsorId)
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'ctaLabel', 'ctaUrl', 'badgeText', 'active', 'updatedAt']);
+      allow delete: if isValidId(sponsorId) && isVerifiedUser() && existing().ownerId == request.auth.uid;
+    }
+
+    // Owner-scoped user link sync records
+    match /userLinks/{linkId} {
+      allow get: if isValidId(linkId) && isVerifiedUser() && existing().ownerId == request.auth.uid;
+      allow list: if isVerifiedUser() && resource.data.ownerId == request.auth.uid;
+      allow create: if isValidId(linkId)
+        && isVerifiedUser()
+        && isValidUserLink(incoming(), linkId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(linkId)
+        && isVerifiedUser()
+        && existing().ownerId == request.auth.uid
+        && isValidUserLink(incoming(), linkId)
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().code == existing().code
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['targetUrl', 'interstitialEnabled', 'sponsorId', 'updatedAt']);
+      allow delete: if isValidId(linkId) && isVerifiedUser() && existing().ownerId == request.auth.uid;
+    }
+  }
+}

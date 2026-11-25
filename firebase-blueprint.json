@@ -1,0 +1,180 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public-safe user profile storing display metadata and default free plan tier.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "plan": {
+          "type": "string",
+          "enum": ["free", "pro"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "plan", "createdAt", "updatedAt"]
+    },
+    "UserPrivateAccount": {
+      "title": "UserPrivateAccount",
+      "description": "PII-isolated private user account metadata (email).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "updatedAt"]
+    },
+    "SponsorCampaign": {
+      "title": "SponsorCampaign",
+      "description": "User-managed sponsor or affiliate offer shown on monetized redirect interstitial pages.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "ctaLabel": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 30
+        },
+        "ctaUrl": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 500
+        },
+        "badgeText": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "title", "ctaLabel", "ctaUrl", "active", "createdAt", "updatedAt"]
+    },
+    "UserLinkRecord": {
+      "title": "UserLinkRecord",
+      "description": "Cloud-synced shortened link ownership record.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 30,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "targetUrl": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048
+        },
+        "interstitialEnabled": {
+          "type": "boolean"
+        },
+        "sponsorId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "code", "targetUrl", "interstitialEnabled", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-scoped public-safe user profile."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateAccount" },
+      "description": "Owner-only PII-isolated account metadata."
+    },
+    "/sponsors/{sponsorId}": {
+      "schema": { "$ref": "#/entities/SponsorCampaign" },
+      "description": "Owner-scoped sponsor/affiliate interstitial campaigns."
+    },
+    "/userLinks/{linkId}": {
+      "schema": { "$ref": "#/entities/UserLinkRecord" },
+      "description": "Owner-scoped cloud-synced short link metadata."
+    }
+  }
+}
